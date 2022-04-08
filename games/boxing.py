@@ -23,7 +23,7 @@ class MuZeroConfig:
         ### Game
         self.observation_shape = (1, 210, 160)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = list(range(18))  # Fixed list of all possible actions. You should only edit the length
-        self.players = list(range(1))  # List of players. You should only edit the length
+        self.players = list(range(2))  # List of players. You should only edit the length
         self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
 
         # Evaluate
@@ -37,7 +37,7 @@ class MuZeroConfig:
         self.selfplay_on_gpu = False
         self.max_moves = 1000  # Maximum number of moves if game is not finished before
         self.num_simulations = 10  # Number of future moves self-simulated
-        self.discount = 0.99  # Chronological discount of the reward
+        self.discount = 0.997  # Chronological discount of the reward
         self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
@@ -78,7 +78,7 @@ class MuZeroConfig:
         ### Training
         self.results_path = pathlib.Path(__file__).resolve().parents[1] / "results" / pathlib.Path(__file__).stem / datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
-        self.training_steps = 50000  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 10000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 1  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
@@ -136,7 +136,7 @@ class Game(AbstractGame):
     """
 
     def __init__(self, seed=None):
-        self.env = frame_stack_v1(color_reduction_v0(boxing_v1.parallel_env(), 'full'), 1)
+        self.env = frame_stack_v1(color_reduction_v0(boxing_v1.env(), 'full'), 1)
         if seed is not None:
             self.env.seed(seed)
 
@@ -150,13 +150,10 @@ class Game(AbstractGame):
         Returns:
             The new observation, the reward and a boolean if the game has ended.
         """
-        actions = {"first_0": action, "second_0": self.env.action_space("second_0").sample()}
-        observation, reward, done, _ = self.env.step(actions)
+        self.env.step(action)
         # self.env.render()
-
-        agent_obsv = numpy.array(observation["first_0"])
-        agent_obsv = numpy.moveaxis(agent_obsv, -1, 0)
-        return agent_obsv, reward["first_0"], done["first_0"]
+        observation, reward, done, _ = self.env.last()
+        return numpy.moveaxis(observation, -1, 0), reward, done
 
     def legal_actions(self):
         """
@@ -181,13 +178,12 @@ class Game(AbstractGame):
         self.env.reset()
 
         # move agents closer to each other
-        observations = 0
+        observation = 0
         for i in range(35):
-            actions = {"first_0": 8, "second_0": 7}
-            observations, rewards, dones, infos = self.env.step(actions)
-        observations = numpy.array(observations["first_0"])
-        observations = numpy.moveaxis(observations, -1, 0)
-        return observations
+            self.env.step(8)
+            self.env.step(7)
+        observation, _, _, _ = self.env.last()
+        return numpy.moveaxis(observation, -1, 0)
 
     def close(self):
         """
