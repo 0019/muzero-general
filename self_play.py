@@ -47,6 +47,7 @@ class SelfPlay:
                     False,
                     "self",
                     0,
+                    test_mode=test_mode
                 )
 
                 replay_buffer.save_game.remote(game_history, shared_storage)
@@ -56,9 +57,10 @@ class SelfPlay:
                 game_history = self.play_game(
                     0,
                     self.config.temperature_threshold,
-                    False,
+                    True,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
                     self.config.muzero_player,
+                    test_mode=test_mode
                 )
 
                 # Save to the shared storage
@@ -108,7 +110,7 @@ class SelfPlay:
         self.close_game()
 
     def play_game(
-        self, temperature, temperature_threshold, render, opponent, muzero_player
+        self, temperature, temperature_threshold, render, opponent, muzero_player, test_mode=False
     ):
         """
         Play one game with actions based on the Monte Carlo tree search at each moves.
@@ -156,20 +158,20 @@ class SelfPlay:
                         else 0,
                     )
 
-                    if render:
-                        print(f'Tree depth: {mcts_info["max_tree_depth"]}')
-                        print(
-                            f"Root value for player {self.game.to_play()}: {root.value():.2f}"
-                        )
+                    # if render:
+                    #     print(f'Tree depth: {mcts_info["max_tree_depth"]}')
+                    #     print(
+                    #         f"Root value for player {self.game.to_play()}: {root.value():.2f}"
+                    #     )
                 else:
                     action, root = self.select_opponent_action(
                         opponent, stacked_observations
                     )
 
-                observation, reward, done = self.game.step(action)
+                observation, reward, done = self.game.step(action, test_mode=test_mode)
 
                 if render:
-                    print(f"Played action: {self.game.action_to_string(action)}")
+                    # print(f"Played action: {self.game.action_to_string(action)}")
                     self.game.render()
 
                 game_history.store_search_statistics(root, self.config.action_space)
@@ -197,11 +199,11 @@ class SelfPlay:
                 self.game.to_play(),
                 True,
             )
-            print(f'Tree depth: {mcts_info["max_tree_depth"]}')
-            print(f"Root value for player {self.game.to_play()}: {root.value():.2f}")
-            print(
-                f"Player {self.game.to_play()} turn. MuZero suggests {self.game.action_to_string(self.select_action(root, 0))}"
-            )
+            # print(f'Tree depth: {mcts_info["max_tree_depth"]}')
+            # print(f"Root value for player {self.game.to_play()}: {root.value():.2f}")
+            # print(
+            #     f"Player {self.game.to_play()} turn. MuZero suggests {self.game.action_to_string(self.select_action(root, 0))}"
+            # )
             return self.game.human_to_action(), root
         elif opponent == "expert":
             return self.game.expert_agent(), None

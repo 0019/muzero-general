@@ -264,6 +264,8 @@ class MuZero:
             "num_reanalysed_games",
         ]
         info = ray.get(self.shared_storage_worker.get_info.remote(keys))
+        save_interval = 1000
+        target_step = 0
         try:
             while info["training_step"] < self.config.training_steps:
                 info = ray.get(self.shared_storage_worker.get_info.remote(keys))
@@ -321,10 +323,16 @@ class MuZero:
                 writer.add_scalar("3.Loss/Reward_loss", info["reward_loss"], counter)
                 writer.add_scalar("3.Loss/Policy_loss", info["policy_loss"], counter)
                 print(
-                    f'Last test reward: {info["total_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
+                    f'MuZero reward: {info["muzero_reward"]:.2f}. Training step: {info["training_step"]}/{self.config.training_steps}. Played games: {info["num_played_games"]}. Loss: {info["total_loss"]:.2f}',
                     end="\r",
                 )
                 counter += 1
+
+                if target_step == 0:
+                    target_step = info["training_step"] + save_interval
+                if info["training_step"] > target_step:
+                    self.persist_model()
+                    target_step += save_interval
                 time.sleep(0.5)
         except KeyboardInterrupt:
             pass
@@ -332,18 +340,21 @@ class MuZero:
         self.terminate_workers()
 
         if self.config.save_model:
-            # Persist replay buffer to disk
-            path = self.config.results_path / "replay_buffer.pkl"
-            print(f"\n\nPersisting replay buffer games to disk at {path}")
-            pickle.dump(
-                {
-                    "buffer": self.replay_buffer,
-                    "num_played_games": self.checkpoint["num_played_games"],
-                    "num_played_steps": self.checkpoint["num_played_steps"],
-                    "num_reanalysed_games": self.checkpoint["num_reanalysed_games"],
-                },
-                open(path, "wb"),
-            )
+            self.persist_model()
+
+    def persist_model(self):
+        # Persist replay buffer to disk
+        path = self.config.results_path / "replay_buffer.pkl"
+        print(f"\n\nPersisting replay buffer games to disk at {path}")
+        pickle.dump(
+            {
+                "buffer": self.replay_buffer,
+                "num_played_games": self.checkpoint["num_played_games"],
+                "num_played_steps": self.checkpoint["num_played_steps"],
+                "num_reanalysed_games": self.checkpoint["num_reanalysed_games"],
+            },
+            open(path, "wb"),
+        )
 
     def terminate_workers(self):
         """
