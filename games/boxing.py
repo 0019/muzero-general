@@ -17,8 +17,8 @@ class MuZeroConfig:
         # fmt: off
         # More information is available here: https://github.com/werner-duvaud/muzero-general/wiki/Hyperparameter-Optimization
 
-        self.seed = 0  # Seed for numpy, torch and the game
-        self.max_num_gpus = None  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
+        self.seed = 10  # Seed for numpy, torch and the game
+        self.max_num_gpus = 1  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
 
         ### Game
         self.observation_shape = (4, 84, 84)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
@@ -33,10 +33,10 @@ class MuZeroConfig:
         ### Self-Play
         self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = False
-        self.max_moves = 1500  # Maximum number of moves if game is not finished before
+        self.max_moves = 2000  # Maximum number of moves if game is not finished before
         self.num_simulations = 20  # Number of future moves self-simulated
         self.discount = 0.99  # Chronological discount of the reward
-        self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
+        self.temperature_threshold = 500  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 0.25
@@ -63,8 +63,8 @@ class MuZeroConfig:
 
         # Fully Connected Network
         self.encoding_size = 32
-        self.fc_representation_layers = [16]  # Define the hidden layers in the representation network
-        self.fc_dynamics_layers = [16]  # Define the hidden layers in the dynamics network
+        self.fc_representation_layers = [32]  # Define the hidden layers in the representation network
+        self.fc_dynamics_layers = [32]  # Define the hidden layers in the dynamics network
         self.fc_reward_layers = [16]  # Define the hidden layers in the reward network
         self.fc_value_layers = [16]  # Define the hidden layers in the value network
         self.fc_policy_layers = [16]  # Define the hidden layers in the policy network
@@ -74,7 +74,7 @@ class MuZeroConfig:
             __file__).stem / datetime.datetime.now().strftime(
             "%Y-%m-%d--%H-%M-%S")  # Path to store the model weights and TensorBoard logs
         self.save_model = True  # Save the checkpoint in results_path as model.checkpoint
-        self.training_steps = 100000  # Total number of training steps (ie weights update according to a batch)
+        self.training_steps = 1000000  # Total number of training steps (ie weights update according to a batch)
         self.batch_size = 128  # Number of parts of games to train on at each training step
         self.checkpoint_interval = 10  # Number of training steps before using the model for self-playing
         self.value_loss_weight = 0.25  # Scale the value loss to avoid overfitting of the value function, paper recommends 0.25 (See paper appendix Reanalyze)
@@ -86,7 +86,7 @@ class MuZeroConfig:
 
         # Exponential learning rate schedule
         self.lr_init = 0.003  # Initial learning rate
-        self.lr_decay_rate = 1  # Set it to 1 to use a constant learning rate
+        self.lr_decay_rate = 0.9999  # Set it to 1 to use a constant learning rate
         self.lr_decay_steps = 1000
 
         ### Replay Buffer
@@ -103,7 +103,7 @@ class MuZeroConfig:
         ### Adjust the self play / training ratio to avoid over/underfitting
         self.self_play_delay = 0  # Number of seconds to wait after each played game
         self.training_delay = 0  # Number of seconds to wait after each training step
-        self.ratio = 0.3  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
+        self.ratio = None  # Desired training steps per self played step ratio. Equivalent to a synchronous version, training can take much longer. Set it to None to disable it
         # fmt: on
 
     def visit_softmax_temperature_fn(self, trained_steps):
@@ -131,9 +131,18 @@ class Game(AbstractGame):
         self.env = self.preset_settings_env(boxing_v1.env())
         if seed is not None:
             self.env.seed(seed)
+        self.scores = {}
+        self.steps = 0
+        self.step_limit = 1500
+        self.reset_game()
         # self.env = gym.make("ALE/Boxing-v5")
 
-    def step(self, action, test_mode=False):
+    def reset_game(self):
+        self.steps = 0
+        self.scores["first_0"] = 0
+        self.scores["second_0"] = 0
+
+    def step(self, action):
         """
         Apply action to the game.
 
@@ -146,13 +155,27 @@ class Game(AbstractGame):
 
         action_agent = self.env.agent_selection
         self.env.step(action)
-
-        return numpy.moveaxis(self.env.observe(action_agent), -1, 0), \
-               self.env._cumulative_rewards.get(action_agent, 0) * 20, \
-               self.env.dones.get(action_agent, False)
+        self.scores[action_agent] += self.env.rewards[action_agent]
+        self.steps += 1
+        if self.agent_wins(action_agent):
+            reward = 10
+            done = True
+        else:
+            reward = 0
+            done = self.draw()
+        return numpy.moveaxis(self.env.observe(action_agent), -1, 0), reward, done
 
         # observation, reward, done, _ = self.env.step(action)
         # return numpy.array([[observation]]), reward, done
+
+    def agent_wins(self, agent):
+        top = max(self.scores, key=self.scores.get)
+        bottom = min(self.scores, key=self.scores.get)
+        winner = top if top != bottom else ""
+        return self.steps >= self.step_limit and agent == winner
+
+    def draw(self):
+        return self.steps >= self.step_limit and self.scores["first_0"] == self.scores["second_0"]
 
     def legal_actions(self):
         """
@@ -175,7 +198,7 @@ class Game(AbstractGame):
             Initial observation of the game.
         """
         self.env.reset()
-
+        self.reset_game()
         # move agents closer to each other
         observation = 0
         for i in range(20):

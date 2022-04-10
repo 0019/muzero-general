@@ -46,8 +46,7 @@ class SelfPlay:
                     self.config.temperature_threshold,
                     False,
                     "self",
-                    0,
-                    test_mode=test_mode
+                    0
                 )
 
                 replay_buffer.save_game.remote(game_history, shared_storage)
@@ -59,8 +58,7 @@ class SelfPlay:
                     self.config.temperature_threshold,
                     True,
                     "self" if len(self.config.players) == 1 else self.config.opponent,
-                    self.config.muzero_player,
-                    test_mode=test_mode
+                    self.config.muzero_player
                 )
 
                 # Save to the shared storage
@@ -110,7 +108,7 @@ class SelfPlay:
         self.close_game()
 
     def play_game(
-        self, temperature, temperature_threshold, render, opponent, muzero_player, test_mode=False
+        self, temperature, temperature_threshold, render, opponent, muzero_player
     ):
         """
         Play one game with actions based on the Monte Carlo tree search at each moves.
@@ -168,7 +166,7 @@ class SelfPlay:
                         opponent, stacked_observations
                     )
 
-                observation, reward, done = self.game.step(action, test_mode=test_mode)
+                observation, reward, done = self.game.step(action)
 
                 if render:
                     # print(f"Played action: {self.game.action_to_string(action)}")

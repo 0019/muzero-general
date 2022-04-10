@@ -1,5 +1,6 @@
 import datetime
 import pathlib
+import time
 
 import numpy
 import torch
@@ -178,8 +179,9 @@ class Game(AbstractGame):
         """
         Display the game observation.
         """
-        self.env.render()
-        input("Press enter to take a step ")
+        if self.env.have_winner():
+            self.env.render()
+        time.sleep(0.1)
 
     def human_to_action(self):
         """
