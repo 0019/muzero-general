@@ -1,9 +1,9 @@
 import datetime
 import pathlib
-
+import cv2
 import numpy
 import torch
-import gym
+numpy.set_printoptions(threshold=numpy.inf)
 
 from supersuit import frame_stack_v1, color_reduction_v0, \
     max_observation_v0, frame_skip_v0, resize_v0, clip_reward_v0, black_death_v3
@@ -21,7 +21,7 @@ class MuZeroConfig:
         self.max_num_gpus = 1  # Fix the maximum number of GPUs to use. It's usually faster to use a single GPU (set it to 1) if it has enough memory. None will use every GPUs available
 
         ### Game
-        self.observation_shape = (4, 84, 84)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
+        self.observation_shape = (4, 56, 50)  # Dimensions of the game observation, must be 3D (channel, height, width). For a 1D array, please reshape it to (1, 1, length of array)
         self.action_space = list(range(18))  # Fixed list of all possible actions. You should only edit the length
         self.players = list(range(2))  # List of players. You should only edit the length
         self.stacked_observations = 0  # Number of previous observations and previous actions to add to the current observation
@@ -34,9 +34,9 @@ class MuZeroConfig:
         self.num_workers = 4  # Number of simultaneous threads/workers self-playing to feed the replay buffer
         self.selfplay_on_gpu = False
         self.max_moves = 2000  # Maximum number of moves if game is not finished before
-        self.num_simulations = 20  # Number of future moves self-simulated
-        self.discount = 0.99  # Chronological discount of the reward
-        self.temperature_threshold = 500  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
+        self.num_simulations = 200  # Number of future moves self-simulated
+        self.discount = 0.997  # Chronological discount of the reward
+        self.temperature_threshold = None  # Number of moves before dropping the temperature given by visit_softmax_temperature_fn to 0 (ie selecting the best action). If None, visit_softmax_temperature_fn is used every time
 
         # Root prior exploration noise
         self.root_dirichlet_alpha = 0.25
@@ -86,7 +86,7 @@ class MuZeroConfig:
 
         # Exponential learning rate schedule
         self.lr_init = 0.003  # Initial learning rate
-        self.lr_decay_rate = 0.9999  # Set it to 1 to use a constant learning rate
+        self.lr_decay_rate = 0.999  # Set it to 1 to use a constant learning rate
         self.lr_decay_steps = 1000
 
         ### Replay Buffer
@@ -157,25 +157,40 @@ class Game(AbstractGame):
         self.env.step(action)
         self.scores[action_agent] += self.env.rewards[action_agent]
         self.steps += 1
-        if self.agent_wins(action_agent):
-            reward = 10
-            done = True
-        else:
-            reward = 0
-            done = self.draw()
-        return numpy.moveaxis(self.env.observe(action_agent), -1, 0), reward, done
 
-        # observation, reward, done, _ = self.env.step(action)
-        # return numpy.array([[observation]]), reward, done
+        done = False
+        reward = 0
+        if self.steps >= self.step_limit:
+            if self.scores["first_0"] == self.scores["second_0"]:
+                done = True
+            if action_agent == "first_0" and self.scores["first_0"] > self.scores["second_0"]:
+                done = True
+                reward = self.scores["first_0"] - self.scores["second_0"]
+            elif action_agent == "second_0" and self.scores["second_0"] > self.scores["first_0"]:
+                done = True
+                reward = self.scores["second_0"] - self.scores["first_0"]
 
-    def agent_wins(self, agent):
-        top = max(self.scores, key=self.scores.get)
-        bottom = min(self.scores, key=self.scores.get)
-        winner = top if top != bottom else ""
-        return self.steps >= self.step_limit and agent == winner
+        # crop image
+        a = numpy.moveaxis(self.env.observe(action_agent), -1, 0)
+        a = self.crop_and_color_image(a)
+        if action_agent == "second_0":
+            a = self.flip_image_color(a)
 
-    def draw(self):
-        return self.steps >= self.step_limit and self.scores["first_0"] == self.scores["second_0"]
+        return a, reward * 10, done
+
+    def crop_and_color_image(self, a):
+        a = a[:, :, 17:67]
+        a = a[:, 15:71, :]
+        # black set to 10, white set to 255
+        a = numpy.where(a >= 120, 255, a)  # to full white
+        a = numpy.where(a <= 100, 10, a)  # to full black
+        return a
+
+    def flip_image_color(self, a):
+        a = numpy.where(a == 255, 1, a)  # white to black
+        a = numpy.where(a == 10, 255, a)  # black to white
+        a = numpy.where(a == 1, 10, a)  # black to white
+        return a
 
     def legal_actions(self):
         """
@@ -200,12 +215,13 @@ class Game(AbstractGame):
         self.env.reset()
         self.reset_game()
         # move agents closer to each other
-        observation = 0
-        for i in range(20):
+        for i in range(8):
             self.env.step(8)
             self.env.step(7)
         observation, _, _, _ = self.env.last()
-        return numpy.moveaxis(observation, -1, 0)
+        a = numpy.moveaxis(observation, -1, 0)
+        a = self.crop_and_color_image(a)
+        return a
 
     def close(self):
         """
